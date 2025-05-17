@@ -16,7 +16,6 @@ import numpy as np
 import time
 from torch import einsum
 from basicsr.utils.registry import ARCH_REGISTRY
-from basicsr.models.archs.fft_fusion import FFTFusion
 
 #########################################
 class ConvBlock(nn.Module):
@@ -42,6 +41,37 @@ class ConvBlock(nn.Module):
     def flops(self, H, W): 
         flops = H*W*self.in_channel*self.out_channel*(3*3+1)+H*W*self.out_channel*self.out_channel*3*3
         return flops
+
+class FFTFusion(nn.Module):
+    """Token-shape (B N C)  ⇆  NCHW 频域抑条纹"""
+    def __init__(self, dim):
+        super().__init__()
+        # 深度可分 1×1，等价在频域对每通道幅值做平滑
+        self.attn_amp = nn.Conv2d(dim, dim, 1, 1, groups=dim, bias=False)
+
+    def forward(self, x, H, W):
+        """
+        x : (B, N, C)  token 格式
+        H, W : 当前特征图长宽
+        """
+        B, N, C = x.shape
+        feat = x.transpose(1, 2).reshape(B, C, H, W)        # → B C H W
+
+        # ① FFT
+        freq = torch.fft.rfft2(feat, norm='ortho')          # 复数张量
+        amp  = torch.abs(freq)                              # 幅值
+        phase= torch.angle(freq)                            # 相位
+
+        # ② 幅值卷积抑制尖峰
+        amp = self.attn_amp(amp)
+
+        # ③ 还原复数谱并 IFFT
+        freq_filtered = torch.polar(amp, phase)
+        feat_rec = torch.fft.irfft2(freq_filtered, s=(H, W), norm='ortho')
+
+        # ④ 残差 + reshape 回 token
+        feat_out = (feat_rec + feat).reshape(B, C, -1).transpose(1, 2)  # B N C
+        return feat_out
 
 class UNet(nn.Module):
     def __init__(self, block=ConvBlock,dim=32):
@@ -1355,7 +1385,7 @@ class Uformer(nn.Module):
         # --- FFT-Fusion:  H=W=img_size/16 ---
         h4 = w4 = self.reso // (2 ** 4)
         conv4 = self.fft_fusion(conv4, h4, w4)
-        
+
         #Decoder
         up0 = self.upsample_0(conv4)
         deconv0 = torch.cat([up0,conv3],-1)
