@@ -16,6 +16,7 @@ import numpy as np
 import time
 from torch import einsum
 from basicsr.utils.registry import ARCH_REGISTRY
+from basicsr.models.archs.fft_fusion import FFTFusion
 
 #########################################
 class ConvBlock(nn.Module):
@@ -1246,6 +1247,9 @@ class Uformer(nn.Module):
                             norm_layer=norm_layer,
                             use_checkpoint=use_checkpoint,
                             token_projection=token_projection,token_mlp=token_mlp,se_layer=se_layer)
+        
+        # FFT-Fusion after bottleneck
+        self.fft_fusion = FFTFusion(embed_dim*16)
 
         # Decoder
         self.upsample_0 = upsample(embed_dim*16, embed_dim*8)
@@ -1348,6 +1352,10 @@ class Uformer(nn.Module):
         # Bottleneck
         conv4 = self.conv(pool3, mask=mask)
 
+        # --- FFT-Fusion:  H=W=img_size/16 ---
+        h4 = w4 = self.reso // (2 ** 4)
+        conv4 = self.fft_fusion(conv4, h4, w4)
+        
         #Decoder
         up0 = self.upsample_0(conv4)
         deconv0 = torch.cat([up0,conv3],-1)
