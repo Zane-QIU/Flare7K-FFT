@@ -114,7 +114,7 @@ class DeflareModel(SRModel):
         if hasattr(self, 'net_g_ema'):
             self.net_g_ema.eval()
             with torch.no_grad():
-                self.output = self.net_g_ema(self.lq)
+                self.output = self.net_g_ema(self.input4)
         else:
             self.net_g.eval()
             with torch.no_grad():

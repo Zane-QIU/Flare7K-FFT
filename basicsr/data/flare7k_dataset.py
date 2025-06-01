@@ -6,7 +6,8 @@ import numpy as np
 from PIL import Image
 import glob
 import random
-
+import os.path as osp
+import cv2
 import torchvision.transforms.functional as TF
 from torch.distributions import Normal
 import torch
@@ -222,8 +223,17 @@ class Image_Pair_Loader(data.Dataset):
         lq_path = self.paths['lq'][index]
         img_lq=self.transform(Image.open(lq_path).convert('RGB'))
         img_gt=self.transform(Image.open(gt_path).convert('RGB'))
-
-        return {'lq': img_lq, 'gt': img_gt}
+        mask_dir = "/content/Flare7K-FFT/dataset/mask"
+        mask_filename = osp.basename(lq_path).replace('.png', '_masked.png').replace('.jpg', '_masked.jpg')
+        mask_path = osp.join(mask_dir, mask_filename)
+        if osp.exists(mask_path):
+            mask_np = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE).astype('float32') / 255.0  # (H0,W0)
+            mask_img = Image.fromarray((mask_np*255).astype('uint8'))                        # PIL 方便 transform
+            mask_t   = self.transform(mask_img) 
+        else:
+            mask_t = torch.zeros(1, self.gt_size, self.gt_size, dtype=torch.float32)
+        img_lq4 = torch.cat([img_lq, mask_t], dim=0)
+        return {'lq': img_lq4, 'gt': img_gt}
 
     def __len__(self):
         return len(self.paths['lq'])
