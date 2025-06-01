@@ -6,6 +6,8 @@ import numpy as np
 from PIL import Image
 import glob
 import random
+import os.path as osp
+import cv2
 
 import torchvision.transforms.functional as TF
 from torch.distributions import Normal
@@ -91,19 +93,32 @@ class Flare_Image_Loader(data.Dataset):
 		# load base image
 		img_path=self.data_list[index]
 		base_img= Image.open(img_path).convert('RGB')
-		
+		# ---------- 读掩膜 ----------
+		mask_path = img_path.replace(".jpg", "_masked.jpg").replace(".png", "_masked.png")
+		if not osp.exists(mask_path):
+			raise FileNotFoundError(f'Mask {mask_path} not found')
+		mask_np = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)
+		H, W = base_img.size[1], base_img.size[0]
+		if mask_np.shape[0] != H or mask_np.shape[1] != W:
+			mask_np = cv2.resize(mask_np, (W, H), interpolation=cv2.INTER_NEAREST)
+
+		mask_np = mask_np.astype('float32') / 255.
+		mask_tensor = torch.from_numpy(mask_np).unsqueeze(0)        # (1,H,W)
+
 		gamma=np.random.uniform(1.8,2.2)
 		to_tensor=transforms.ToTensor()
 		adjust_gamma=RandomGammaCorrection(gamma)
 		adjust_gamma_reverse=RandomGammaCorrection(1/gamma)
 		color_jitter=transforms.ColorJitter(brightness=(0.8,3),hue=0.0)
+		base_img = to_tensor(base_img)           # (3,H,W)
+		base_img = adjust_gamma(base_img)
+
+		# 拼接 mask → (4,H,W) 再做同一组随机裁剪 / 翻转
+		base_plus_mask = torch.cat((base_img, mask_tensor), dim=0)   # 4 chan
 		if self.transform_base is not None:
-			base_img=to_tensor(base_img)
-			base_img=adjust_gamma(base_img)
-			base_img=self.transform_base(base_img)
-		else:
-			base_img=to_tensor(base_img)
-			base_img=adjust_gamma(base_img)
+			base_plus_mask = self.transform_base(base_plus_mask)
+		base_img, mask_tensor = torch.split(base_plus_mask, [3,1], dim=0)
+
 		sigma_chi=0.01*np.random.chisquare(df=1)
 		base_img=Normal(base_img,sigma_chi).sample()
 		gain=np.random.uniform(0.5,1.2)
@@ -174,7 +189,17 @@ class Flare_Image_Loader(data.Dataset):
 			flare_img=flare_img-light_img
 			flare_img=torch.clamp(flare_img,min=0,max=1)
 		if self.mask_type==None:
-			return {'gt': adjust_gamma_reverse(base_img),'flare': adjust_gamma_reverse(flare_img),'lq': adjust_gamma_reverse(merge_img),'gamma':gamma}
+			base_rev  = adjust_gamma_reverse(base_img)    # (3,H,W)
+			flare_rev = adjust_gamma_reverse(flare_img)
+			merge_rev = adjust_gamma_reverse(merge_img)
+
+			lq = torch.cat((merge_rev, mask_tensor), dim=0)   # (4,H,W)
+
+			return {'gt': base_rev,
+					'flare': flare_rev,
+					'lq': lq,
+					'gamma': gamma}
+		
 		elif self.mask_type=="luminance":
 			#calculate mask (the mask is 3 channel)
 			one = torch.ones_like(base_img)
@@ -204,7 +229,12 @@ class Flare_Image_Loader(data.Dataset):
 			luminance=0.3*light_img[0]+0.59*light_img[1]+0.11*light_img[2]
 			threshold_value=0.01
 			flare_mask=torch.where(luminance >threshold_value, one, zero)
-		return {'gt': adjust_gamma_reverse(base_img),'flare': adjust_gamma_reverse(flare_img),'lq': adjust_gamma_reverse(merge_img),'mask': flare_mask,'gamma': gamma}
+		lq = torch.cat((adjust_gamma_reverse(merge_img), mask_tensor), dim=0)
+		return {'gt': adjust_gamma_reverse(base_img),
+				'flare': adjust_gamma_reverse(flare_img),
+				'lq': lq,
+				'mask': flare_mask,      # 保留原有掩膜字段（可用可不用）
+				'gamma': gamma}
 
 	def __len__(self):
 		return len(self.data_list)

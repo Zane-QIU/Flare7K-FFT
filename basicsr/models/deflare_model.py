@@ -53,6 +53,8 @@ class DeflareModel(SRModel):
 
     def feed_data(self, data):
         self.lq = data['lq'].to(self.device)
+        self.mask = self.lq[:, 3:4, :, :]
+        self.lq_img = self.lq
         self.gt = data['gt'].to(self.device)
         if 'flare' in data:
             self.flare = data['flare'].to(self.device)
@@ -62,7 +64,7 @@ class DeflareModel(SRModel):
 
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
-        self.output = self.net_g(self.lq)
+        self.output = self.net_g(self.lq_img)
         
         if self.output_ch==6:
             self.deflare,self.flare_hat,self.merge_hat=predict_flare_from_6_channel(self.output,self.gamma)
@@ -76,7 +78,10 @@ class DeflareModel(SRModel):
         loss_dict = OrderedDict()
         # l1 loss
         l1_flare = self.l1_pix(self.flare_hat, self.flare)
-        l1_base = self.l1_pix(self.deflare, self.gt)
+        alpha = 4.0
+        weight = 1.0 + alpha * self.mask
+        diff_base = torch.abs(self.deflare - self.gt)
+        l1_base = (diff_base * weight).mean()
         l1=l1_flare+l1_base
         if self.output_ch==6:
             l1_recons= self.l1_pix(self.merge_hat, self.lq)
@@ -112,7 +117,7 @@ class DeflareModel(SRModel):
         else:
             self.net_g.eval()
             with torch.no_grad():
-                self.output = self.net_g(self.lq)
+                self.output = self.net_g(self.lq_img)
         if self.output_ch==6:
             self.deflare,self.flare_hat,self.merge_hat=predict_flare_from_6_channel(self.output,self.gamma)
         elif self.output_ch==3:
