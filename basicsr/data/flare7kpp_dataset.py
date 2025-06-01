@@ -94,7 +94,10 @@ class Flare_Image_Loader(data.Dataset):
 		img_path=self.data_list[index]
 		base_img= Image.open(img_path).convert('RGB')
 		# ---------- 读掩膜 ----------
-		mask_path = img_path.replace(".jpg", "_masked.jpg").replace(".png", "_masked.png")
+		mask_dir = "/content/Flare7K-FFT/dataset/mask"
+		mask_filename = osp.basename(img_path).replace('.png', '_masked.png').replace('.jpg', '_masked.jpg')
+		mask_path = osp.join(mask_dir, mask_filename)
+
 		if not osp.exists(mask_path):
 			raise FileNotFoundError(f'Mask {mask_path} not found')
 		mask_np = cv2.imread(mask_path, cv2.IMREAD_GRAYSCALE)

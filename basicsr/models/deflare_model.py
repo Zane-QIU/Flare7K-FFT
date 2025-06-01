@@ -52,10 +52,11 @@ class DeflareModel(SRModel):
         self.setup_schedulers()
 
     def feed_data(self, data):
-        self.lq = data['lq'].to(self.device)
-        self.mask = self.lq[:, 3:4, :, :]
-        self.lq_img = self.lq
+        lq_full = data['lq'].to(self.device)      # (B,4,H,W)
+        self.mask = lq_full[:, 3:4, :, :]         # (B,1,H,W)
+        self.lq   = lq_full[:, 0:3, :, :]         # 仅 RGB (B,3,H,W)
         self.gt = data['gt'].to(self.device)
+        self.input4 = lq_full
         if 'flare' in data:
             self.flare = data['flare'].to(self.device)
             self.gamma = data['gamma'].to(self.device)
@@ -64,7 +65,7 @@ class DeflareModel(SRModel):
 
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
-        self.output = self.net_g(self.lq_img)
+        self.output = self.net_g(self.input4)
         
         if self.output_ch==6:
             self.deflare,self.flare_hat,self.merge_hat=predict_flare_from_6_channel(self.output,self.gamma)
@@ -117,7 +118,7 @@ class DeflareModel(SRModel):
         else:
             self.net_g.eval()
             with torch.no_grad():
-                self.output = self.net_g(self.lq_img)
+                self.output = self.net_g(self.input4)
         if self.output_ch==6:
             self.deflare,self.flare_hat,self.merge_hat=predict_flare_from_6_channel(self.output,self.gamma)
         elif self.output_ch==3:
