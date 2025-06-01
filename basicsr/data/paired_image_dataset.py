@@ -5,7 +5,7 @@ from basicsr.data.data_util import paired_paths_from_folder, paired_paths_from_l
 from basicsr.data.transforms import augment, paired_random_crop
 from basicsr.utils import FileClient, bgr2ycbcr, imfrombytes, img2tensor
 from basicsr.utils.registry import DATASET_REGISTRY
-
+import numpy as np
 
 @DATASET_REGISTRY.register()
 class PairedImageDataset(data.Dataset):
@@ -76,6 +76,17 @@ class PairedImageDataset(data.Dataset):
         lq_path = self.paths[index]['lq_path']
         img_bytes = self.file_client.get(lq_path, 'lq')
         img_lq = imfrombytes(img_bytes, float32=True)
+        
+        # add mask
+        mask_path = lq_path.replace('.png', '_masked.png').replace('.jpg', '_masked.jpg')
+        mask_bytes = self.file_client.get(mask_path, 'lq')
+        mask = imfrombytes(mask_bytes, float32=True)  # 读为float32数组, 范围[0,1]
+        if mask.ndim == 2:  # 若读入为二维灰度
+           mask = mask[..., None]               # 转为 (H, W, 1)
+        mask = mask.astype(np.float32)
+        mask = mask / 255.0 
+        # 将掩膜作为额外通道拼接到 LQ 图像上
+        img_lq = np.concatenate([img_lq, mask], axis=2)  # 结果维度: (H, W, 4)
 
         # augmentation for training
         if self.opt['phase'] == 'train':
@@ -96,7 +107,8 @@ class PairedImageDataset(data.Dataset):
             img_gt = img_gt[0:img_lq.shape[0] * scale, 0:img_lq.shape[1] * scale, :]
 
         # BGR to RGB, HWC to CHW, numpy to tensor
-        img_gt, img_lq = img2tensor([img_gt, img_lq], bgr2rgb=True, float32=True)
+        img_gt = img2tensor(img_gt, bgr2rgb=True, float32=True)
+        img_lq = img2tensor(img_lq, bgr2rgb=False, float32=True)
         # normalize
         if self.mean is not None or self.std is not None:
             normalize(img_lq, self.mean, self.std, inplace=True)

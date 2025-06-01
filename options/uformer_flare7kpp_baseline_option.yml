@@ -49,7 +49,7 @@ datasets:
 network_g:
   type: Uformer
   img_size: 512
-  img_ch: 3
+  img_ch: 4
   output_ch: 6
   multi_stage: 1
 

@@ -85,24 +85,35 @@ class SRModel(BaseModel):
         self.optimizers.append(self.optimizer_g)
 
     def feed_data(self, data):
+        # lq 形状 (B,4,H,W) : 0-2 RGB, 3 mask
         self.lq = data['lq'].to(self.device)
+        # 单独存 mask，方便做 loss 加权
+        self.mask = self.lq[:, 3:4, :, :]          # (B,1,H,W)
+        self.lq_img = self.lq[:, 0:4, :, :]        # 仍用 4 通道送入网络
         if 'gt' in data:
             self.gt = data['gt'].to(self.device)
 
     def optimize_parameters(self, current_iter):
         self.optimizer_g.zero_grad()
-        self.output = self.net_g(self.lq)
+        self.output = self.net_g(self.lq_img)      # 送入 4 通道
 
         l_total = 0
         loss_dict = OrderedDict()
         # pixel loss
-        if self.cri_pix:
-            l_pix = self.cri_pix(self.output, self.gt)
-            l_total += l_pix
-            loss_dict['l_pix'] = l_pix
+        # ===== 1) 取出清晰部分 =====
+        pred_clean = self.output[:, 0:3, :, :]     # (B,3,H,W)
+        gt_clean   = self.gt[:, 0:3, :, :]         # GT 也是 3 or 6 通道，取前 3
+
+        # ===== 2) mask 加权 L1 =====
+        alpha = 4.0                                # 高光区域权重 (可调)
+        weight = 1.0 + alpha * self.mask           # (B,1,H,W)
+        l1_map = torch.abs(pred_clean - gt_clean)  # (B,3,H,W)
+        l_pix  = (l1_map * weight).mean()
+        l_total += l_pix
+        loss_dict['l_pix'] = l_pix
         # perceptual loss
         if self.cri_perceptual:
-            l_percep, l_style = self.cri_perceptual(self.output, self.gt)
+            l_percep, l_style = self.cri_perceptual(pred_clean, gt_clean)
             if l_percep is not None:
                 l_total += l_percep
                 loss_dict['l_percep'] = l_percep
@@ -217,8 +228,8 @@ class SRModel(BaseModel):
 
     def get_current_visuals(self):
         out_dict = OrderedDict()
-        out_dict['lq'] = self.lq.detach().cpu()
-        out_dict['result'] = self.output.detach().cpu()
+        out_dict['lq'] = self.lq_img.detach().cpu()          # 可选：仅前三通道
+        out_dict['result'] = self.output[:, 0:3, :, :].detach().cpu()
         if hasattr(self, 'gt'):
             out_dict['gt'] = self.gt.detach().cpu()
         return out_dict
