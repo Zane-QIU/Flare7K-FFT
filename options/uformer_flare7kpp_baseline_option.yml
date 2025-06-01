@@ -41,8 +41,8 @@ datasets:
   val:
     name: flare_test
     type: Image_Pair_Loader
-    dataroot_gt: dataset/Flare7Kpp/val/gt
-    dataroot_lq: dataset/Flare7Kpp/val/input
+    dataroot_gt: dataset/Flare7Kpp/test_data/real/gt
+    dataroot_lq: dataset/Flare7Kpp/test_data/real/input
     gt_size: 512
 
 # network structures
@@ -88,7 +88,7 @@ train:
 
 # validation settings
 val:
-  val_freq: !!float 5e3
+  val_freq: !!float 3e3
   save_img: true
 
   metrics:
@@ -104,7 +104,7 @@ val:
 # logging settings
 logger:
   print_freq: 100
-  save_checkpoint_freq: !!float 5e3
+  save_checkpoint_freq: !!float 3e3
   use_tb_logger: true
   wandb:
     project: ~
