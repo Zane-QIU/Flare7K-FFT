@@ -118,7 +118,7 @@ def demo(images_path,output_path,model_type,output_ch,pretrain_dir,flare7kpp_fla
     os.makedirs(result_path, exist_ok=True)
     torch.cuda.empty_cache()
     if model_type=='Uformer':
-        model=Uformer(img_size=512,img_ch=3,output_ch=output_ch).cuda()
+        model=Uformer(img_size=512,img_ch=4,output_ch=output_ch).cuda()
         model.load_state_dict(load_params(pretrain_dir))
     elif model_type=='U_Net' or model_type=='U-Net':
         model=U_Net(img_ch=3,output_ch=output_ch).cuda()
@@ -130,6 +130,11 @@ def demo(images_path,output_path,model_type,output_ch,pretrain_dir,flare7kpp_fla
 
     for i,image_path in tqdm(enumerate(test_path)):
         img_name = os.path.basename(image_path)
+        mask_dir = "/content/Flare7K-FFT/dataset/mask"
+        mask_name = img_name.replace('.jpg', '_masked.jpg').replace('.png', '_masked.png')
+        mask_path = os.path.join(mask_dir, mask_name)
+        mask = Image.open(mask_path).convert('L')
+        
         if not flare7kpp_flag:
             mkdir(os.path.join(result_path,"deflare/"))
             deflare_path = os.path.join(result_path,"deflare/",img_name)
@@ -141,10 +146,13 @@ def demo(images_path,output_path,model_type,output_ch,pretrain_dir,flare7kpp_fla
         blend_path = os.path.join(result_path,"blend/",img_name)
 
         merge_img = Image.open(image_path).convert("RGB")
-
+        
+        if mask.size != merge_img.size:                      # (W,H) 不同就拉伸
+            mask = mask.resize(merge_img.size, Image.NEAREST)
+        merge_rgba = Image.merge('RGBA', (*merge_img.split(), mask))
         model.eval()
         with torch.no_grad():
-            output_img=processor.process_image(merge_img).unsqueeze(0)
+            output_img=processor.process_image(merge_rgba).unsqueeze(0)
             gamma=torch.Tensor([2.2])
             if output_ch==6:
                 deflare_img,flare_img_predicted,merge_img_predicted=predict_flare_from_6_channel(output_img,gamma)
